@@ -1,0 +1,85 @@
+name: Build Installable APK
+
+# Upstream reproducible-build.yml uses -PskipSigning (unsigned, not
+# installable) and never uploads the APK. This one emits a debug-signed APK.
+on:
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: 'Attach APK to a GitHub Release'
+        type: boolean
+        required: true
+        default: false
+      release_tag:
+        description: 'Release tag (used when publish_release is true)'
+        required: false
+        default: 'ci-apk'
+  push:
+    tags: ['v*']
+    branches: ['ci/phone-av']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6.1.0
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+
+      - name: Install SDK components
+        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Build debug APK (auto-signed, installable)
+        shell: bash
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --no-daemon --max-workers=1
+
+      - name: Collect APK
+        shell: bash
+        run: |
+          mkdir -p dist
+          APK=$(find app/build/outputs/apk/debug -name '*.apk' | head -n 1)
+          test -n "$APK"
+          cp "$APK" dist/android-ip-camera-debug.apk
+          sha256sum dist/*.apk > dist/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: installable-apk
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: ${{ inputs.publish_release || startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: installable-apk
+          path: dist
+
+      - name: Create or update release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag || github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          gh release create "$TAG" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$SHA" \
+            --title "APK $TAG" \
+            --notes "Built by GitHub Actions from $SHA" \
+            || gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
