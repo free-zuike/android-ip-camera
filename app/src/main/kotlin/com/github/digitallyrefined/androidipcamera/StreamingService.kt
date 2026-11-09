@@ -258,7 +258,7 @@ class StreamingService : LifecycleService() {
     private fun startForegroundService() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             getSystemService(NotificationManager::class.java)
-                .createNotificationChannel(NotificationChannel(CHANNEL_ID, "Streaming Service", NotificationManager.IMPORTANCE_LOW))
+                .createNotificationChannel(NotificationChannel(CHANNEL_ID, "推流服务", NotificationManager.IMPORTANCE_LOW))
         }
         val contentPI = PendingIntent.getActivity(this, 0,
             Intent(this, com.github.digitallyrefined.androidipcamera.activities.MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
@@ -267,12 +267,12 @@ class StreamingService : LifecycleService() {
         val restartPI = PendingIntent.getService(this, 2,
             Intent(this, StreamingService::class.java).setAction(ACTION_RESTART_NOTIFICATION), PendingIntent.FLAG_IMMUTABLE)
         val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Android IP Camera Streaming")
-            .setContentText("Camera server is running in background")
+            .setContentTitle("网络摄像头推流")
+            .setContentText("摄像头服务正在后台运行")
             .setSmallIcon(R.drawable.ic_notification)
             .setLargeIcon(BitmapFactory.decodeResource(resources, R.mipmap.ic_launcher))
             .setContentIntent(contentPI)
-            .addAction(R.drawable.ic_notification, "Exit App", stopPI)
+            .addAction(R.drawable.ic_notification, "退出应用", stopPI)
             .setDeleteIntent(restartPI)
             .setOngoing(true)
             .build()
@@ -345,7 +345,7 @@ class StreamingService : LifecycleService() {
                 kotlinx.coroutines.delay(100)
                 initServer()
             } else launch(Dispatchers.Main) {
-                Toast.makeText(this@StreamingService, "Failed to generate certificate", Toast.LENGTH_LONG).show()
+                Toast.makeText(this@StreamingService, "证书生成失败", Toast.LENGTH_LONG).show()
             }
         }
     }

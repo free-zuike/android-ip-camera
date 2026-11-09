@@ -45,7 +45,7 @@ object ListenInterface {
 
     /** Selectable options: all interfaces first, then every interface that currently has an address. */
     fun options(): List<Pair<String, String>> = buildList {
-        add("All interfaces" to DEFAULT)
+        add("全部网卡" to DEFAULT)
         val interfaces = runCatching { NetworkInterface.getNetworkInterfaces()?.toList().orEmpty() }
             .getOrDefault(emptyList())
             .filter { it.isUp && !it.isLoopback }
@@ -122,11 +122,11 @@ object ListenInterface {
         val addresses = localAddresses()
         val names = interfaceNames()
         return buildString {
-            append("Listen address ").append(value).append(" is not assigned to this device.")
-            if (addresses.isNotEmpty()) append(" Available addresses: ").append(addresses.joinToString(", ")).append('.')
+            append("监听地址 ").append(value).append(" 未分配给本机。")
+            if (addresses.isNotEmpty()) append(" 可用地址：").append(addresses.joinToString(", ")).append('.')
             if (names.isNotEmpty()) {
-                append(" Use an interface name (").append(names.joinToString(", "))
-                    .append(") to follow its current address automatically.")
+                append(" 可使用网卡名称（").append(names.joinToString(", "))
+                    .append("）以自动跟随其当前地址。")
             }
         }
     }

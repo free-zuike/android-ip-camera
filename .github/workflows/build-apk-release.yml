@@ -54,6 +54,25 @@ jobs:
           cp "$APK" dist/android-ip-camera-debug.apk
           sha256sum dist/*.apk > dist/SHA256SUMS.txt
 
+      - name: Verify 64-bit ABI and fixed signing certificate
+        shell: bash
+        run: |
+          APK=dist/android-ip-camera-debug.apk
+          echo "== native libraries =="
+          unzip -l "$APK" | grep -E 'lib/(arm64-v8a|armeabi-v7a|x86)/' || \
+            echo "(no bundled .so: pure Kotlin/Java APK, installs on 64-bit devices)"
+          if unzip -l "$APK" | grep -q 'lib/armeabi-v7a/'; then
+            echo "::error::armeabi-v7a libs found, build must be arm64-v8a only"
+            exit 1
+          fi
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | head -n 1)
+          echo "== signing certificate (must be identical on every build) =="
+          if [ -n "$APKSIGNER" ]; then
+            "$APKSIGNER" verify --print-certs "$APK" | tee dist/SIGNING_CERT.txt
+          else
+            echo "apksigner not found, skipping certificate dump"
+          fi
+
       - uses: actions/upload-artifact@v7
         with:
           name: installable-apk

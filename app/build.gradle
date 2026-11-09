@@ -23,6 +23,12 @@ android {
         versionCode 161
         versionName "0.16.1"
 
+        // phone-av CI builds ship a 64-bit-only APK. All target phones are
+        // arm64-v8a; keeping armeabi-v7a out also avoids Play's 32-bit warning.
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+
         // https://f-droid.org/docs/Reproducible_Builds/#pngs-generated-from-vector-drawables
         vectorDrawables.generatedDensities = []
     }
@@ -33,6 +39,17 @@ android {
     }
 
     signingConfigs {
+        // CI builds all share this debug key. AGP would otherwise generate a
+        // brand-new debug keystore on every clean runner, so each APK carries a
+        // different signature and Android refuses to update an existing install
+        // (INSTALL_FAILED_UPDATE_INCOMPATIBLE -> manual uninstall every time).
+        // This key is for CI/debug installs only, never for store releases.
+        debug {
+            storeFile rootProject.file('ci/phone-av-ci.keystore')
+            storePassword 'phoneavci'
+            keyAlias 'phoneavci'
+            keyPassword 'phoneavci'
+        }
         release {
           if (skipSigning) {
               // Unsigned release builds for reproducible build verification.

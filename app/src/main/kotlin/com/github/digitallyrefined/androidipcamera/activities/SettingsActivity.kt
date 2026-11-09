@@ -53,7 +53,7 @@ class SettingsActivity : AppCompatActivity() {
                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
                     }
                     startActivityForResult(
-                        Intent.createChooser(intent, "Select TLS Certificate"),
+                        Intent.createChooser(intent, "选择 TLS 证书"),
                         PICK_CERTIFICATE_FILE
                     )
                     true
@@ -115,7 +115,7 @@ class SettingsActivity : AppCompatActivity() {
                     val username = newValue.toString()
                     if (username.isNotEmpty() && !InputValidator.isValidUsername(username)) {
                         Toast.makeText(requireContext(),
-                            "Username must be 1-50 characters, letters/numbers/hyphens/underscores only",
+                            "用户名长度为 1–50 个字符，仅支持字母、数字、连字符和下划线",
                             Toast.LENGTH_LONG).show()
                         return@setOnPreferenceChangeListener false
                     }
@@ -132,7 +132,7 @@ class SettingsActivity : AppCompatActivity() {
                 // Do not show the existing password when editing
                 setOnBindEditTextListener { editText ->
                     editText.text = null
-                    editText.hint = "Enter new password"
+                    editText.hint = "输入新密码"
                 }
 
                 setOnPreferenceChangeListener { _, newValue ->
@@ -146,7 +146,7 @@ class SettingsActivity : AppCompatActivity() {
                     if (!InputValidator.isValidPassword(password)) {
                         Toast.makeText(
                             requireContext(),
-                            "Password must be 8-128 characters with uppercase, lowercase, and number",
+                            "密码长度为 8–128 个字符，须包含大写字母、小写字母和数字",
                             Toast.LENGTH_LONG
                         ).show()
                         return@setOnPreferenceChangeListener false
@@ -173,20 +173,20 @@ class SettingsActivity : AppCompatActivity() {
                     if (port == null || port !in 1..65535) {
                         Toast.makeText(
                             requireContext(),
-                            "Port must be between 1 and 65535",
+                            "端口必须在 1 到 65535 之间",
                             Toast.LENGTH_LONG
                         ).show()
                         return@setOnPreferenceChangeListener false
                     }
                     if (isRtspEnabled() && port == configuredRtspPort()) {
-                        Toast.makeText(requireContext(), "Port is already used by the RTSP server", Toast.LENGTH_LONG).show()
+                        Toast.makeText(requireContext(), "该端口已被 RTSP 服务占用", Toast.LENGTH_LONG).show()
                         return@setOnPreferenceChangeListener false
                     }
                     if (isRtspEnabled() && port == configuredOnvifPort()) {
-                        Toast.makeText(requireContext(), "Port is already used by the ONVIF server", Toast.LENGTH_LONG).show()
+                        Toast.makeText(requireContext(), "该端口已被 ONVIF 服务占用", Toast.LENGTH_LONG).show()
                         return@setOnPreferenceChangeListener false
                     }
-                    summary = "Port $port"
+                    summary = "端口 $port"
                     restartStreamingServer()
                     true
                 }
@@ -201,7 +201,7 @@ class SettingsActivity : AppCompatActivity() {
                 // Migrates IP addresses saved by older versions to the matching interface name.
                 value = ListenInterface.value(requireContext())
                 summaryProvider = Preference.SummaryProvider<androidx.preference.ListPreference> {
-                    it.entry ?: "All interfaces"
+                    it.entry ?: "全部网卡"
                 }
                 setOnPreferenceChangeListener { _, newValue ->
                     if (newValue.toString() !in entryValues) {
@@ -215,13 +215,13 @@ class SettingsActivity : AppCompatActivity() {
             // Sub stream (/live/sub): applied the next time a viewer connects to it
             findPreference<androidx.preference.ListPreference>(RtspServer.PREF_SUB_SIZE)?.summaryProvider =
                 Preference.SummaryProvider<androidx.preference.ListPreference> {
-                    "${it.entry}. Smaller stream at ${if (TlsHelper.isEnabled(requireContext())) "rtsps" else "rtsp"}://[ip_address]:[port]${RtspServer.SUB_PATH} for slow connections such as 4G"
+                    "${it.entry}，副码流地址 ${if (TlsHelper.isEnabled(requireContext())) "rtsps" else "rtsp"}://[ip_address]:[port]${RtspServer.SUB_PATH}（适合 4G 等慢速网络）"
                 }
             findPreference<androidx.preference.ListPreference>(RtspServer.PREF_SUB_FPS)?.summaryProvider =
                 androidx.preference.ListPreference.SimpleSummaryProvider.getInstance()
             findPreference<androidx.preference.ListPreference>(RtspServer.PREF_SUB_BITRATE)?.summaryProvider =
                 Preference.SummaryProvider<androidx.preference.ListPreference> {
-                    "${it.entry} video. Keep it to about half the viewer's connection speed so dips don't stall it"
+                    "${it.entry} 视频。建议设为观看端网速的一半左右，避免网络波动时卡顿"
                 }
 
             // Optional RTSP/ONVIF server: shares the camera, encoder and credentials with the HTTP
@@ -230,26 +230,26 @@ class SettingsActivity : AppCompatActivity() {
                 setRtspOptionsVisible(isChecked)
                 setOnvifOptionsVisible(isChecked)
                 summaryProvider = Preference.SummaryProvider<androidx.preference.CheckBoxPreference> {
-                    "Serve the camera at ${if (TlsHelper.isEnabled(requireContext())) "rtsps" else "rtsp"}://[ip_address]:[port]/live (H.264 video, AAC audio) and enable ONVIF discovery/control for VLC, Frigate, NVRs and Home Assistant, using the same username and password"
+                    "通过 ${if (TlsHelper.isEnabled(requireContext())) "rtsps" else "rtsp"}://[ip_address]:[port]/live 提供摄像头画面（H.264 视频、AAC 音频），并为 VLC、Frigate、NVR 和 Home Assistant 启用 ONVIF 发现与控制，使用相同的用户名和密码"
                 }
 
                 setOnPreferenceChangeListener { _, newValue ->
                     val enabled = newValue as Boolean
                     if (enabled && configuredRtspPort() == configuredHttpPort()) {
                         Toast.makeText(requireContext(),
-                            "RTSP port must differ from the streaming port",
+                            "RTSP 端口不能与推流端口相同",
                             Toast.LENGTH_LONG).show()
                         return@setOnPreferenceChangeListener false
                     }
                     if (enabled && configuredRtspPort() == configuredOnvifPort()) {
                         Toast.makeText(requireContext(),
-                            "RTSP port must differ from the ONVIF port",
+                            "RTSP 端口不能与 ONVIF 端口相同",
                             Toast.LENGTH_LONG).show()
                         return@setOnPreferenceChangeListener false
                     }
                     if (enabled && configuredOnvifPort() == configuredHttpPort()) {
                         Toast.makeText(requireContext(),
-                            "ONVIF port must differ from the streaming port",
+                            "ONVIF 端口不能与推流端口相同",
                             Toast.LENGTH_LONG).show()
                         return@setOnPreferenceChangeListener false
                     }
@@ -268,18 +268,18 @@ class SettingsActivity : AppCompatActivity() {
                 setOnPreferenceChangeListener { _, newValue ->
                     val port = newValue.toString().toIntOrNull()
                     if (port == null || port !in 1..65535) {
-                        Toast.makeText(requireContext(), "Port must be between 1 and 65535", Toast.LENGTH_LONG).show()
+                        Toast.makeText(requireContext(), "端口必须在 1 到 65535 之间", Toast.LENGTH_LONG).show()
                         return@setOnPreferenceChangeListener false
                     }
                     if (port == configuredHttpPort()) {
-                        Toast.makeText(requireContext(), "RTSP port must differ from the streaming port", Toast.LENGTH_LONG).show()
+                        Toast.makeText(requireContext(), "RTSP 端口不能与推流端口相同", Toast.LENGTH_LONG).show()
                         return@setOnPreferenceChangeListener false
                     }
                     if (isRtspEnabled() && port == configuredOnvifPort()) {
-                        Toast.makeText(requireContext(), "RTSP port must differ from the ONVIF port", Toast.LENGTH_LONG).show()
+                        Toast.makeText(requireContext(), "RTSP 端口不能与 ONVIF 端口相同", Toast.LENGTH_LONG).show()
                         return@setOnPreferenceChangeListener false
                     }
-                    summary = "Port $port"
+                    summary = "端口 $port"
                     restartStreamingServer()
                     true
                 }
@@ -300,18 +300,18 @@ class SettingsActivity : AppCompatActivity() {
                 setOnPreferenceChangeListener { _, newValue ->
                     val port = newValue.toString().toIntOrNull()
                     if (port == null || port !in 1..65535) {
-                        Toast.makeText(requireContext(), "Port must be between 1 and 65535", Toast.LENGTH_LONG).show()
+                        Toast.makeText(requireContext(), "端口必须在 1 到 65535 之间", Toast.LENGTH_LONG).show()
                         return@setOnPreferenceChangeListener false
                     }
                     if (port == configuredHttpPort()) {
-                        Toast.makeText(requireContext(), "ONVIF port must differ from the streaming port", Toast.LENGTH_LONG).show()
+                        Toast.makeText(requireContext(), "ONVIF 端口不能与推流端口相同", Toast.LENGTH_LONG).show()
                         return@setOnPreferenceChangeListener false
                     }
                     if (port == configuredRtspPort()) {
-                        Toast.makeText(requireContext(), "ONVIF port must differ from the RTSP port", Toast.LENGTH_LONG).show()
+                        Toast.makeText(requireContext(), "ONVIF 端口不能与 RTSP 端口相同", Toast.LENGTH_LONG).show()
                         return@setOnPreferenceChangeListener false
                     }
-                    summary = "Port $port"
+                    summary = "端口 $port"
                     restartStreamingServer()
                     true
                 }
@@ -322,7 +322,7 @@ class SettingsActivity : AppCompatActivity() {
                 // Do not pre-fill the existing certificate password when editing
                 setOnBindEditTextListener { editText ->
                     editText.text = null
-                    editText.hint = "Enter certificate password"
+                    editText.hint = "输入证书密码"
                 }
 
                 setOnPreferenceChangeListener { _, newValue ->
@@ -330,7 +330,7 @@ class SettingsActivity : AppCompatActivity() {
                     if (!InputValidator.isValidCertificatePassword(password)) {
                         Toast.makeText(
                             requireContext(),
-                            "Certificate password too long (max 256 characters)",
+                            "证书密码过长（最多 256 个字符）",
                             Toast.LENGTH_LONG
                         ).show()
                         return@setOnPreferenceChangeListener false
@@ -340,7 +340,7 @@ class SettingsActivity : AppCompatActivity() {
                     if (password.isEmpty()) {
                         Toast.makeText(
                             requireContext(),
-                            "Certificate password is required",
+                            "必须填写证书密码",
                             Toast.LENGTH_LONG
                         ).show()
                         return@setOnPreferenceChangeListener false
@@ -350,7 +350,7 @@ class SettingsActivity : AppCompatActivity() {
                     secureStorage.putSecureString(SecureStorage.KEY_CERT_PASSWORD, password)
                     Toast.makeText(
                         requireContext(),
-                        "Certificate password saved, use 'Test Certificate Setup' to validate",
+                        "证书密码已保存，可用「测试证书配置」验证",
                         Toast.LENGTH_SHORT
                     ).show()
                     // Restart server when certificate password changes
@@ -372,7 +372,7 @@ class SettingsActivity : AppCompatActivity() {
                         )
                     }
                     startActivityForResult(
-                        Intent.createChooser(intent, "Select recording folder"),
+                        Intent.createChooser(intent, "选择录像文件夹"),
                         PICK_RECORDING_FOLDER
                     )
                     true
@@ -397,7 +397,7 @@ class SettingsActivity : AppCompatActivity() {
                         .apply()
                     findPreference<Preference>("recording_storage_uri")?.summary = recordingStorageSummary()
                     Toast.makeText(requireContext(),
-                        "Recordings will be saved to Movies/AndroidIPCamera",
+                        "录像将保存到 Movies/AndroidIPCamera",
                         Toast.LENGTH_SHORT).show()
                     true
                 }
@@ -412,7 +412,7 @@ class SettingsActivity : AppCompatActivity() {
 
                     if (certPassword.isNullOrEmpty()) {
                         Toast.makeText(requireContext(),
-                            "Certificate password not configured, set it above first",
+                            "尚未设置证书密码，请先在上方填写",
                             Toast.LENGTH_LONG).show()
                         return@setOnPreferenceClickListener true
                     }
@@ -433,11 +433,11 @@ class SettingsActivity : AppCompatActivity() {
 
                     if (isValid) {
                         Toast.makeText(requireContext(),
-                            "✅ Certificate configuration is valid",
+                            "✅ 证书配置有效",
                             Toast.LENGTH_LONG).show()
                     } else {
                         Toast.makeText(requireContext(),
-                            "❌ Certificate validation failed, check password and certificate file",
+                            "❌ 证书校验失败，请检查密码和证书文件",
                             Toast.LENGTH_LONG).show()
                     }
 
@@ -455,7 +455,7 @@ class SettingsActivity : AppCompatActivity() {
                     // Enhanced certificate validation
                     if (!InputValidator.isValidCertificatePath(requireContext(), certificatePath)) {
                         Toast.makeText(requireContext(),
-                            "Invalid certificate file, must be a valid .p12 or .pfx file under 10MB",
+                            "证书文件无效，请选择小于 10MB 的有效 .p12 或 .pfx 文件",
                             Toast.LENGTH_LONG).show()
                         return@let
                     }
@@ -475,7 +475,7 @@ class SettingsActivity : AppCompatActivity() {
                     } catch (e: Exception) {
                         Toast.makeText(
                             requireContext(),
-                            "Could not store the certificate: ${e.message}",
+                            "无法保存证书：${e.message}",
                             Toast.LENGTH_LONG
                         ).show()
                         return@let
@@ -515,13 +515,13 @@ class SettingsActivity : AppCompatActivity() {
                     if (unlocked) {
                         Toast.makeText(
                             requireContext(),
-                            "Certificate configured, restart the app for changes to take effect",
+                            "证书已配置，重启应用后生效",
                             Toast.LENGTH_SHORT
                         ).show()
                     } else {
                         Toast.makeText(
                             requireContext(),
-                            "Certificate selected. Set its password in Certificate Password, then use Test Certificate Setup.",
+                            "已选择证书，请在「证书密码」中填写密码，然后使用「测试证书配置」验证。",
                             Toast.LENGTH_LONG
                         ).show()
                     }
@@ -540,10 +540,10 @@ class SettingsActivity : AppCompatActivity() {
                             .apply()
                         findPreference<Preference>("recording_storage_uri")?.summary = recordingStorageSummary()
                         Toast.makeText(requireContext(),
-                            "Recording location updated", Toast.LENGTH_SHORT).show()
+                            "录像保存位置已更新", Toast.LENGTH_SHORT).show()
                     } catch (e: Exception) {
                         Toast.makeText(requireContext(),
-                            "Could not use that folder: ${e.message}",
+                            "无法使用该文件夹：${e.message}",
                             Toast.LENGTH_LONG).show()
                     }
                 }
@@ -554,9 +554,9 @@ class SettingsActivity : AppCompatActivity() {
         /** Summary for the storage preference: the chosen folder name or the default path. */
         private fun recordingStorageSummary(): String {
             val uri = RecordingsHelper.customStorageUri(requireContext())
-                ?: return "Default: ${RecordingsHelper.DEFAULT_RELATIVE_PATH}"
+                ?: return "默认位置：${RecordingsHelper.DEFAULT_RELATIVE_PATH}"
             val name = DocumentFile.fromTreeUri(requireContext(), uri)?.name
-            return "Custom folder: ${name ?: uri}"
+            return "自定义文件夹：${name ?: uri}"
         }
 
         private fun setRtspOptionsVisible(visible: Boolean) {
@@ -588,7 +588,7 @@ class SettingsActivity : AppCompatActivity() {
                 action = StreamingService.ACTION_RESTART_SERVER
             }
             requireContext().startService(intent)
-            Toast.makeText(requireContext(), "Server restarting...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(requireContext(), "服务正在重启…", Toast.LENGTH_SHORT).show()
         }
     }
 }

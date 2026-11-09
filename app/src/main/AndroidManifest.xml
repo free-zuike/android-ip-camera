@@ -25,7 +25,7 @@
     <uses-feature android:name="android.hardware.camera.any" />
 
     <application
-        android:label="Android IP Camera"
+        android:label="网络摄像头"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
         android:theme="@style/Theme.AppCompat.Light.DarkActionBar">
@@ -39,7 +39,7 @@
         </activity>
         <activity
             android:name=".activities.SettingsActivity"
-            android:label="Settings"
+            android:label="设置"
             android:parentActivityName=".activities.MainActivity" />
 
         <service

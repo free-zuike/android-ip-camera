@@ -303,7 +303,7 @@ class StreamingServerHelper(
 
         // Show toast when starting server
         Handler(Looper.getMainLooper()).post {
-            Toast.makeText(context, "Server starting...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "服务启动中…", Toast.LENGTH_SHORT).show()
         }
 
         // Stop existing server BEFORE creating new one (outside the coroutine)
@@ -396,7 +396,7 @@ class StreamingServerHelper(
                       if (generation == serverGeneration) isStarting = false
                   }
                   Handler(Looper.getMainLooper()).post {
-                      Toast.makeText(context, "Server started", Toast.LENGTH_SHORT).show()
+                      Toast.makeText(context, "服务已启动", Toast.LENGTH_SHORT).show()
                   }
                   var lastConnectionCleanupMs = 0L
                   while (isActive && !Thread.currentThread().isInterrupted) {

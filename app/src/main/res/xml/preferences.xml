@@ -2,135 +2,135 @@
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
     <PreferenceCategory
-        android:title="Authentication">
+        android:title="身份验证">
         <CheckBoxPreference
             android:key="enable_auth"
-            android:title="Enable Authentication"
-            android:summary="Require username/password to access the stream"
+            android:title="启用身份验证"
+            android:summary="访问视频流需要提供用户名和密码"
             android:defaultValue="true" />
         <EditTextPreference
             android:key="username"
-            android:title="Username"
+            android:title="用户名"
             android:defaultValue=""
             android:singleLine="true" />
         <EditTextPreference
             android:key="password"
-            android:title="Password"
+            android:title="密码"
             android:defaultValue=""
             android:inputType="textPassword"
             android:singleLine="true" />
     </PreferenceCategory>
 
     <PreferenceCategory
-        android:title="Startup">
+        android:title="启动">
         <CheckBoxPreference
             android:key="start_on_boot"
-            android:title="Start on Boot"
-            android:summary="Start the camera server automatically after the device restarts"
+            android:title="开机自启"
+            android:summary="设备重启后自动启动摄像头服务"
             android:defaultValue="false" />
         <EditTextPreference
             android:key="server_port"
-            android:title="Streaming Port"
-            android:summary="Port for the streaming server (default: 4444)"
+            android:title="推流端口"
+            android:summary="推流服务使用的端口（默认：4444）"
             android:defaultValue="4444"
             android:inputType="number"
             android:singleLine="true" />
         <ListPreference
             android:key="listen_interface"
-            android:title="Listen Interface"
-            android:summary="Interface all servers listen on (default: all interfaces)"
+            android:title="监听网卡"
+            android:summary="所有服务监听的网卡（默认：全部网卡）"
             android:defaultValue="0.0.0.0" />
     </PreferenceCategory>
 
     <PreferenceCategory android:title="RTSP / ONVIF">
         <CheckBoxPreference
             android:key="rtsp_enabled"
-            android:title="Enable RTSP"
+            android:title="启用 RTSP"
             android:defaultValue="false" />
         <EditTextPreference
             android:key="rtsp_port"
-            android:title="RTSP Port"
-            android:summary="Port for the RTSP server (default: 8554)"
+            android:title="RTSP 端口"
+            android:summary="RTSP 服务端口（默认：8554）"
             android:defaultValue="8554"
             android:inputType="number"
             android:singleLine="true" />
         <CheckBoxPreference
             android:key="rtsp_audio"
-            android:title="Include Audio"
-            android:summary="Add the microphone to the RTSP stream as an AAC audio track (requires the microphone permission)"
+            android:title="包含音频"
+            android:summary="把麦克风作为 AAC 音轨加入 RTSP 流（需要麦克风权限）"
             android:defaultValue="true" />
         <ListPreference
             android:key="rtsp_sub_size"
-            android:title="Sub Stream Resolution"
+            android:title="副码流分辨率"
             android:defaultValue="360"
             android:entries="@array/rtsp_sub_size_entries"
             android:entryValues="@array/rtsp_sub_size_values" />
         <ListPreference
             android:key="rtsp_sub_fps"
-            android:title="Sub Stream Frame Rate"
+            android:title="副码流帧率"
             android:defaultValue="15"
             android:entries="@array/rtsp_sub_fps_entries"
             android:entryValues="@array/rtsp_sub_fps_values" />
         <ListPreference
             android:key="rtsp_sub_bitrate"
-            android:title="Sub Stream Bitrate"
+            android:title="副码流码率"
             android:defaultValue="500"
             android:entries="@array/rtsp_sub_bitrate_entries"
             android:entryValues="@array/rtsp_sub_bitrate_values" />
         <EditTextPreference
             android:key="onvif_name"
-            android:title="ONVIF Camera Name"
-            android:summary="Name shown to ONVIF clients (default: device model)"
+            android:title="ONVIF 设备名称"
+            android:summary="ONVIF 客户端显示的名称（默认：设备型号）"
             android:defaultValue=""
             android:singleLine="true" />
         <EditTextPreference
             android:key="onvif_port"
-            android:title="ONVIF Port"
-            android:summary="Port for the ONVIF service (default: 8000)"
+            android:title="ONVIF 端口"
+            android:summary="ONVIF 服务端口（默认：8000）"
             android:defaultValue="8000"
             android:inputType="number"
             android:singleLine="true" />
     </PreferenceCategory>
 
-    <PreferenceCategory android:title="Recording">
+    <PreferenceCategory android:title="录像">
         <Preference
             android:key="recording_storage_uri"
-            android:title="Recording Storage Location"
-            android:summary="Recordings are saved to Movies/AndroidIPCamera on the internal storage. Tap to pick a different folder, for example on an SD card."
+            android:title="录像保存位置"
+            android:summary="录像默认保存在内部存储的 Movies/AndroidIPCamera，点击可选择其它文件夹（例如 SD 卡）。"
             android:persistent="true" />
         <Preference
             android:key="reset_recording_storage"
-            android:title="Reset to Default Location"
-            android:summary="Save recordings back to Movies/AndroidIPCamera"
+            android:title="恢复默认保存位置"
+            android:summary="把录像重新保存到 Movies/AndroidIPCamera"
             android:persistent="false" />
     </PreferenceCategory>
 
-    <PreferenceCategory android:title="Certificate Settings">
+    <PreferenceCategory android:title="证书设置">
         <CheckBoxPreference
             android:key="tls_enabled"
-            android:title="Enable TLS/HTTPS"
-            android:summary="Use the same certificate for the web server, RTSPS, and ONVIF endpoints"
+            android:title="启用 TLS/HTTPS"
+            android:summary="Web 服务、RTSPS 和 ONVIF 端点共用同一份证书"
             android:defaultValue="true" />
         <ListPreference
             android:key="tls_version"
-            android:title="TLS Version"
-            android:summary="Automatically use the newest platform TLS or force TLS 1.2"
+            android:title="TLS 版本"
+            android:summary="自动使用系统支持的最新 TLS，或强制使用 TLS 1.2"
             android:defaultValue="1.3"
             android:entries="@array/tls_version_entries"
             android:entryValues="@array/tls_version_values" />
         <Preference
             android:key="certificate_path"
-            android:title="Custom TLS Certificate" android:summary="Select your own certificate" android:persistent="true" />
+            android:title="自定义 TLS 证书" android:summary="选择自己的证书" android:persistent="true" />
         <EditTextPreference
             android:key="certificate_password"
-            android:title="Certificate Password"
-            android:summary="Optional password for the TLS certificate"
+            android:title="证书密码"
+            android:summary="TLS 证书密码（可选）"
             android:persistent="true"
             android:inputType="textPassword" />
         <Preference
             android:key="test_certificate"
-            android:title="Test Certificate Setup"
-            android:summary="Validate your certificate configuration"
+            android:title="测试证书配置"
+            android:summary="验证证书配置是否有效"
             android:persistent="false" />
     </PreferenceCategory>
 </PreferenceScreen>

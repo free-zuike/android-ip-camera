@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string-array name="tls_version_entries">
-        <item>Automatic (TLS 1.3 on Android 10+, otherwise TLS 1.2)</item>
+        <item>自动（Android 10 及以上使用 TLS 1.3，其余使用 TLS 1.2）</item>
         <item>TLS 1.2</item>
     </string-array>
     <string-array name="tls_version_values">
@@ -46,5 +46,5 @@
         <item>20</item>
         <item>30</item>
     </string-array>
-    <string name="streaming_active">🔴 Streaming active</string>
+    <string name="streaming_active">🔴 正在推流</string>
 </resources>

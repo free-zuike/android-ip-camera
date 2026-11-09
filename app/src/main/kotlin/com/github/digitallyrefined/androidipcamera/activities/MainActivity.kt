@@ -228,7 +228,7 @@ class MainActivity : AppCompatActivity() {
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
             val channel = manager.getNotificationChannel("streaming_service_channel")
             if (channel != null && channel.importance == android.app.NotificationManager.IMPORTANCE_NONE) {
-                Toast.makeText(this, "Notification permissions are required for the camera server to function", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "需要开启通知权限，摄像头服务才能正常运行", Toast.LENGTH_LONG).show()
                 exitApp()
             }
         }
@@ -277,14 +277,14 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == REQUEST_CODE_PERMISSIONS) {
             if (allPermissionsGranted()) {
                 if (!hasAudioPermission()) {
-                    Toast.makeText(this, "Microphone permission denied audio streaming disabled", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "麦克风权限被拒绝，音频推流已禁用", Toast.LENGTH_LONG).show()
                 }
                 startService()
             } else {
                 androidx.appcompat.app.AlertDialog.Builder(this)
-                    .setTitle("Permissions Required")
-                    .setMessage("Camera and notification permissions are required for the camera server to function. Please enable them in App Settings.")
-                    .setPositiveButton("Settings") { _, _ ->
+                    .setTitle("需要权限")
+                    .setMessage("摄像头和通知权限是摄像头服务正常运行的必要条件，请在应用设置中开启。")
+                    .setPositiveButton("去设置") { _, _ ->
                         val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                             data = android.net.Uri.fromParts("package", packageName, null)
                         }
@@ -342,7 +342,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             runOnUiThread {
-                Toast.makeText(this, "Black screen, swipe back to exit", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "已隐藏预览，使用返回手势可退出", Toast.LENGTH_SHORT).show()
             }
         } else {
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
