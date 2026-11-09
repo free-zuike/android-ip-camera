@@ -101,6 +101,7 @@ class StreamingServerHelper(
     private val talkLock = Any()
     private var talkTrack: AudioTrack? = null
     private var talkTrackActive = false
+    private var talkTrackSampleRate = 44100
     private var talkLastWriteAt = 0L
     @Volatile
     private var talkWatchdogStarted = false
@@ -647,7 +648,8 @@ class StreamingServerHelper(
             }
 
             if (!isStreamingEnabled() &&
-                (path.startsWith("/video") || path == "/audio" || path == "/audio/raw" || path == "/audio/upload")
+                (path.startsWith("/video") || path == "/audio" || path == "/audio/raw" ||
+                    path == "/audio/pcm" || path == "/audio/upload" || path == "/audio/upload/16000")
             ) {
                 writer.print("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n")
                 writer.print("Streaming is disabled. POST /control/start to re-enable.\r\n")
@@ -762,7 +764,9 @@ class StreamingServerHelper(
                 return
             }
 
-            if (path == "/audio" || path == "/audio/raw") {
+            if (path == "/audio" || path == "/audio/raw" || path == "/audio/pcm") {
+                val rawPcm = path == "/audio/pcm"
+                val contentType = if (rawPcm) "application/octet-stream" else "audio/wav"
                 if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                     writer.print("HTTP/1.1 403 Forbidden\r\n")
                     writer.print("Content-Type: text/plain\r\n")
@@ -786,11 +790,11 @@ class StreamingServerHelper(
                     writer.print("Cache-Control: no-cache, no-store, must-revalidate\r\n")
                     writer.print("Pragma: no-cache\r\n")
                     writer.print("Expires: 0\r\n")
-                    writer.print("Content-Type: audio/wav\r\n")
+                    writer.print("Content-Type: $contentType\r\n")
                     writer.print("Transfer-Encoding: chunked\r\n\r\n")
                     writer.flush()
 
-                    val sampleRate = 44100
+                    val sampleRate = if (rawPcm) 16000 else 44100
                     val channelConfig = AudioFormat.CHANNEL_IN_MONO
                     val audioFormat = AudioFormat.ENCODING_PCM_16BIT
                     val minBuffer = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
@@ -798,7 +802,7 @@ class StreamingServerHelper(
                         throw IOException("Invalid AudioRecord buffer size: $minBuffer")
                     }
                     val bufferSize = minBuffer * 2
-                    val rawAudio = path == "/audio/raw"
+                    val rawAudio = path == "/audio/raw" || rawPcm
                     // UNPROCESSED is a hint; many HALs (especially on API 24-28) don't
                     // implement it and the AudioRecord ctor throws IllegalArgumentException.
                     // Fall back to the plain MIC source in that case.
@@ -831,12 +835,14 @@ class StreamingServerHelper(
                         )
                     }
 
-                    val wavHeader = createWavHeader(
-                        sampleRate = sampleRate,
-                        bitsPerSample = 16,
-                        channels = 1
-                    )
-                    writeChunk(outputStream, wavHeader, wavHeader.size)
+                    if (!rawPcm) {
+                        val wavHeader = createWavHeader(
+                            sampleRate = sampleRate,
+                            bitsPerSample = 16,
+                            channels = 1
+                        )
+                        writeChunk(outputStream, wavHeader, wavHeader.size)
+                    }
 
                     audioRecord.startRecording()
                     val pcmBuffer = ByteArray(bufferSize)
@@ -911,7 +917,8 @@ class StreamingServerHelper(
             }
 
             // ---- Push-to-talk: browser streams mic PCM to the phone's speaker ----
-            if (path == "/audio/upload" && httpMethod == "POST") {
+            if ((path == "/audio/upload" || path == "/audio/upload/16000") && httpMethod == "POST") {
+                val talkSampleRate = if (path == "/audio/upload/16000") 16000 else 44100
                 val headerMap = headers.mapNotNull { hdr ->
                     val idx = hdr.indexOf(":")
                     if (idx == -1) return@mapNotNull null
@@ -923,7 +930,7 @@ class StreamingServerHelper(
                 }
                 val contentLength = headerMap["content-length"]?.toIntOrNull()
                 val chunked = headerMap["transfer-encoding"]?.contains("chunked", ignoreCase = true) == true
-                handleTalkUpload(socket, reader, writer, contentLength, chunked)
+                handleTalkUpload(socket, reader, writer, contentLength, chunked, talkSampleRate)
                 return
             }
 
@@ -1088,14 +1095,15 @@ class StreamingServerHelper(
         reader: BufferedReader,
         writer: PrintWriter,
         contentLength: Int?,
-        chunked: Boolean
+        chunked: Boolean,
+        sampleRate: Int = 44100
     ) {
         var headersSent = false
         try {
             ensureTalkWatchdog()
             val completed: Boolean
             if (chunked || contentLength == null) {
-                completed = readChunkedBody(reader) { chunk -> writeTalkBytes(chunk) }
+                completed = readChunkedBody(reader) { chunk -> writeTalkBytes(chunk, sampleRate) }
             } else {
                 var remaining = contentLength
                 val charBuf = CharArray(8192)
@@ -1110,7 +1118,7 @@ class StreamingServerHelper(
                     val chunk = ByteArray(n)
                     for (i in 0 until n) chunk[i] = charBuf[i].code.toByte()
                     remaining -= n
-                    clean = writeTalkBytes(chunk)
+                    clean = writeTalkBytes(chunk, sampleRate)
                 }
                 completed = clean && remaining <= 0
             }
@@ -1144,12 +1152,18 @@ class StreamingServerHelper(
         }
     }
 
-    private fun writeTalkBytes(chunk: ByteArray): Boolean {
+    private fun writeTalkBytes(chunk: ByteArray, sampleRate: Int): Boolean {
         return synchronized(talkLock) {
             try {
+                if (talkTrack != null && talkTrackSampleRate != sampleRate) {
+                    try { talkTrack?.stop() } catch (_: Exception) {}
+                    try { talkTrack?.release() } catch (_: Exception) {}
+                    talkTrack = null
+                    talkTrackActive = false
+                }
                 if (talkTrack == null) {
                     val minBuf = AudioTrack.getMinBufferSize(
-                        44100,
+                        sampleRate,
                         AudioFormat.CHANNEL_OUT_MONO,
                         AudioFormat.ENCODING_PCM_16BIT
                     )
@@ -1166,7 +1180,7 @@ class StreamingServerHelper(
                         )
                         .setAudioFormat(
                             AudioFormat.Builder()
-                                .setSampleRate(44100)
+                                .setSampleRate(sampleRate)
                                 .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                                 .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                                 .build()
@@ -1180,6 +1194,7 @@ class StreamingServerHelper(
                         return@writeTalkBytes false
                     }
                     talkTrack = track
+                    talkTrackSampleRate = sampleRate
                 }
                 val track = talkTrack!!
                 if (!talkTrackActive) {
