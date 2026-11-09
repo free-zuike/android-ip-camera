@@ -49,8 +49,16 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          APK=$(find app/build/outputs/apk/debug -name '*.apk' | head -n 1)
-          test -n "$APK"
+          echo "== generated APKs =="
+          find app/build/outputs/apk/debug -name '*.apk' -printf '%f\n' | sort
+          # AGP emits armeabi-v7a / arm64-v8a / universal splits. The old
+          # "head -n 1" picked whichever came first, usually the 32-bit one.
+          APK=$(find app/build/outputs/apk/debug -name '*arm64-v8a*.apk' | head -n 1)
+          if [ -z "$APK" ]; then
+            echo "::error::arm64-v8a APK not found"
+            exit 1
+          fi
+          echo "Selected 64-bit APK: $APK"
           cp "$APK" dist/android-ip-camera-debug.apk
           sha256sum dist/*.apk > dist/SHA256SUMS.txt
 
