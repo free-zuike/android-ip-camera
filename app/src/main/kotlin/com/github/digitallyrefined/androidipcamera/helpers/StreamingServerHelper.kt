@@ -856,8 +856,39 @@ class StreamingServerHelper(
                                 }
                                 continue
                             }
-                            if (read <= 0) {
-                                // Brief gap (no data available yet) — keep streaming.
+                            if (read < 0) {
+                                // A negative return code means AudioRecord entered an error
+                                // state (e.g. ERROR_INVALID_OPERATION after a rapid reconnect
+                                // churn). Recreate it instead of silently streaming nothing —
+                                // otherwise the device reads all-zero frames and tears the
+                                // connection down in a tight reconnect loop.
+                                onLog("Mic read error ($read), recreating AudioRecord")
+                                try { audioRecord.stop() } catch (_: Exception) {}
+                                try { audioRecord.release() } catch (_: Exception) {}
+                                try {
+                                    audioRecord = AudioRecord(
+                                        MediaRecorder.AudioSource.MIC,
+                                        sampleRate,
+                                        channelConfig,
+                                        audioFormat,
+                                        bufferSize
+                                    )
+                                    audioRecord.startRecording()
+                                } catch (e2: Exception) {
+                                    onLog("Mic recreate failed: ${e2.message}")
+                                }
+                                continue
+                            }
+                            if (read == 0) {
+                                // Brief underrun — emit silence so the device's stream stays
+                                // alive (it would otherwise count zero-length reads and break).
+                                pcmBuffer.fill(0)
+                                try {
+                                    writeChunk(outputStream, pcmBuffer, pcmBuffer.size)
+                                } catch (e: IOException) {
+                                    onLog("Audio stream IO error: ${e.message}")
+                                    break
+                                }
                                 continue
                             }
 
