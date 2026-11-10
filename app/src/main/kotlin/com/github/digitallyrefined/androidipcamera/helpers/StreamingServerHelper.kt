@@ -802,38 +802,18 @@ class StreamingServerHelper(
                         throw IOException("Invalid AudioRecord buffer size: $minBuffer")
                     }
                     val bufferSize = minBuffer * 2
-                    val rawAudio = path == "/audio/raw" || rawPcm
-                    // UNPROCESSED is a hint; many HALs (especially on API 24-28) don't
-                    // implement it and the AudioRecord ctor throws IllegalArgumentException.
-                    // Fall back to the plain MIC source in that case.
-                    val audioRecord = if (rawAudio && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                        try {
-                            AudioRecord(
-                                MediaRecorder.AudioSource.UNPROCESSED,
-                                sampleRate,
-                                channelConfig,
-                                audioFormat,
-                                bufferSize
-                            )
-                        } catch (e: IllegalArgumentException) {
-                            onLog("UNPROCESSED audio source unsupported, falling back to MIC")
-                            AudioRecord(
-                                MediaRecorder.AudioSource.MIC,
-                                sampleRate,
-                                channelConfig,
-                                audioFormat,
-                                bufferSize
-                            )
-                        }
-                    } else {
-                        AudioRecord(
-                            MediaRecorder.AudioSource.MIC,
-                            sampleRate,
-                            channelConfig,
-                            audioFormat,
-                            bufferSize
-                        )
-                    }
+                    // Use the standard MIC source directly. UNPROCESSED can fail or stop
+                    // delivering data on many HALs after a short while, which silently kills
+                    // the xiaozhi microphone feed (the device then sees the stream close and
+                    // reconnects in a tight loop). The plain MIC source is the compatible
+                    // choice for streaming the phone's microphone to the device.
+                    var audioRecord = AudioRecord(
+                        MediaRecorder.AudioSource.MIC,
+                        sampleRate,
+                        channelConfig,
+                        audioFormat,
+                        bufferSize
+                    )
 
                     if (!rawPcm) {
                         val wavHeader = createWavHeader(
@@ -848,9 +828,38 @@ class StreamingServerHelper(
                     val pcmBuffer = ByteArray(bufferSize)
                     val audioPrefs = PreferenceManager.getDefaultSharedPreferences(context)
                     try {
-                        while (socket.isConnected && !socket.isClosed && appInForeground) {
-                            val read = audioRecord.read(pcmBuffer, 0, pcmBuffer.size)
-                            if (read <= 0) continue
+                        // Stream the mic as long as the client (the ESP32 / xiaozhi device) stays
+                        // connected and the streaming server is alive — do NOT gate on the Android
+                        // UI being in the foreground. The device needs a continuous mic feed even
+                        // when the app is backgrounded (screen off / switched away); background
+                        // recording is permitted because StreamingService is a foreground service
+                        // declared with foregroundServiceType="microphone". Gating on appInForeground
+                        // silently killed the feed, causing the device to reconnect in a tight loop.
+                        while (socket.isConnected && !socket.isClosed) {
+                            val read = try {
+                                audioRecord.read(pcmBuffer, 0, pcmBuffer.size)
+                            } catch (e: Exception) {
+                                onLog("Mic read failed, recreating AudioRecord: ${e.message}")
+                                try { audioRecord.stop() } catch (_: Exception) {}
+                                try { audioRecord.release() } catch (_: Exception) {}
+                                try {
+                                    audioRecord = AudioRecord(
+                                        MediaRecorder.AudioSource.MIC,
+                                        sampleRate,
+                                        channelConfig,
+                                        audioFormat,
+                                        bufferSize
+                                    )
+                                    audioRecord.startRecording()
+                                } catch (e2: Exception) {
+                                    onLog("Mic recreate failed: ${e2.message}")
+                                }
+                                continue
+                            }
+                            if (read <= 0) {
+                                // Brief gap (no data available yet) — keep streaming.
+                                continue
+                            }
 
                             // Read audio gain dynamically to allow real-time changes
                             val audioGain = audioPrefs.getString("audio_gain", "1.0")?.toFloatOrNull() ?: 1.0f
