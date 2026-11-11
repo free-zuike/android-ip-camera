@@ -4,6 +4,10 @@
     <!-- Camera permission -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Needed to route the TTS playback onto the call-audio path (VOICE_COMMUNICATION)
+         and force speakerphone, so the OS acoustic echo canceller can use it as the
+         reference for the phone-av mic. Normal permission, granted at install. -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />

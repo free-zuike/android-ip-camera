@@ -8,9 +8,11 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.media.AudioAttributes
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -105,6 +107,7 @@ class StreamingServerHelper(
     private var talkLastWriteAt = 0L
     @Volatile
     private var talkWatchdogStarted = false
+    private var voiceCallModeEntered = false
 
     // SECURITY: Rate limiting constants (only for unauthenticated connections)
     private val MAX_FAILED_ATTEMPTS = 5  // 5 failed attempts allowed
@@ -802,18 +805,34 @@ class StreamingServerHelper(
                         throw IOException("Invalid AudioRecord buffer size: $minBuffer")
                     }
                     val bufferSize = minBuffer * 2
-                    // Use the standard MIC source directly. UNPROCESSED can fail or stop
-                    // delivering data on many HALs after a short while, which silently kills
-                    // the xiaozhi microphone feed (the device then sees the stream close and
-                    // reconnects in a tight loop). The plain MIC source is the compatible
-                    // choice for streaming the phone's microphone to the device.
-                    var audioRecord = AudioRecord(
-                        MediaRecorder.AudioSource.MIC,
-                        sampleRate,
-                        channelConfig,
-                        audioFormat,
-                        bufferSize
-                    )
+                    // Route the mic through VOICE_COMMUNICATION so the OS applies acoustic echo
+                    // cancellation against the phone's own speaker playback. The TTS we push to
+                    // /audio/upload is played on the same call-audio path (see writeTalkBytes),
+                    // so the device no longer receives the echo of its own voice -- this is what
+                    // breaks the self-QA loop. The device firmware runs its own AEC too; the two
+                    // stack safely. (We previously used the plain MIC source, which has no echo
+                    // cancellation and caused the loop.)
+                    var aec: AcousticEchoCanceler? = null
+                    fun newMicRecord(): AudioRecord {
+                        aec?.release()
+                        aec = null
+                        val rec = AudioRecord(
+                            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                            sampleRate,
+                            channelConfig,
+                            audioFormat,
+                            bufferSize
+                        )
+                        if (AcousticEchoCanceler.isAvailable()) {
+                            try {
+                                aec = AcousticEchoCanceler.create(rec.audioSessionId)?.apply { enabled = true }
+                            } catch (_: Exception) {
+                                aec = null
+                            }
+                        }
+                        return rec
+                    }
+                    var audioRecord = newMicRecord()
 
                     if (!rawPcm) {
                         val wavHeader = createWavHeader(
@@ -843,13 +862,7 @@ class StreamingServerHelper(
                                 try { audioRecord.stop() } catch (_: Exception) {}
                                 try { audioRecord.release() } catch (_: Exception) {}
                                 try {
-                                    audioRecord = AudioRecord(
-                                        MediaRecorder.AudioSource.MIC,
-                                        sampleRate,
-                                        channelConfig,
-                                        audioFormat,
-                                        bufferSize
-                                    )
+                                    audioRecord = newMicRecord()
                                     audioRecord.startRecording()
                                 } catch (e2: Exception) {
                                     onLog("Mic recreate failed: ${e2.message}")
@@ -866,13 +879,7 @@ class StreamingServerHelper(
                                 try { audioRecord.stop() } catch (_: Exception) {}
                                 try { audioRecord.release() } catch (_: Exception) {}
                                 try {
-                                    audioRecord = AudioRecord(
-                                        MediaRecorder.AudioSource.MIC,
-                                        sampleRate,
-                                        channelConfig,
-                                        audioFormat,
-                                        bufferSize
-                                    )
+                                    audioRecord = newMicRecord()
                                     audioRecord.startRecording()
                                 } catch (e2: Exception) {
                                     onLog("Mic recreate failed: ${e2.message}")
@@ -919,6 +926,7 @@ class StreamingServerHelper(
                             audioRecord.stop()
                         } catch (_: Exception) {
                         }
+                        try { aec?.release() } catch (_: Exception) {}
                         audioRecord.release()
                         try {
                             outputStream.write("0\r\n\r\n".toByteArray())
@@ -1192,6 +1200,27 @@ class StreamingServerHelper(
         }
     }
 
+    private fun enterVoiceCallMode() {
+        try {
+            val am = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
+            am.mode = AudioManager.MODE_IN_COMMUNICATION
+            am.isSpeakerphoneOn = true
+            voiceCallModeEntered = true
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun exitVoiceCallMode() {
+        if (!voiceCallModeEntered) return
+        try {
+            val am = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            am?.isSpeakerphoneOn = false
+            am?.mode = AudioManager.MODE_NORMAL
+        } catch (_: Exception) {
+        }
+        voiceCallModeEntered = false
+    }
+
     private fun writeTalkBytes(chunk: ByteArray, sampleRate: Int): Boolean {
         return synchronized(talkLock) {
             try {
@@ -1200,6 +1229,7 @@ class StreamingServerHelper(
                     try { talkTrack?.release() } catch (_: Exception) {}
                     talkTrack = null
                     talkTrackActive = false
+                    exitVoiceCallMode()
                 }
                 if (talkTrack == null) {
                     val minBuf = AudioTrack.getMinBufferSize(
@@ -1214,7 +1244,7 @@ class StreamingServerHelper(
                     val track = AudioTrack.Builder()
                         .setAudioAttributes(
                             AudioAttributes.Builder()
-                                .setUsage(AudioAttributes.USAGE_MEDIA)
+                                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
                                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                                 .build()
                         )
@@ -1228,6 +1258,10 @@ class StreamingServerHelper(
                         .setBufferSizeInBytes(maxOf(minBuf * 2, 88 * 1024))
                         .setTransferMode(AudioTrack.MODE_STREAM)
                         .build()
+                    // Put the TTS playback on the call-audio path so the OS acoustic echo
+                    // canceller (driven by the VOICE_COMMUNICATION mic above) uses it as the
+                    // reference. Speakerphone keeps the TTS audible on the loudspeaker.
+                    enterVoiceCallMode()
                     if (track.state != AudioTrack.STATE_INITIALIZED) {
                         track.release()
                         onLog("Talk: AudioTrack could not be initialized (no audio output available)")
@@ -1287,6 +1321,7 @@ class StreamingServerHelper(
                                 }
                                 talkTrack = null
                                 talkTrackActive = false
+                                exitVoiceCallMode()
                             }
                         }
                     }
