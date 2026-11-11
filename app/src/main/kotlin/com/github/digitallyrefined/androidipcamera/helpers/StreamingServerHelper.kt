@@ -7,6 +7,7 @@ import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
@@ -1204,10 +1205,30 @@ class StreamingServerHelper(
         try {
             val am = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
             am.mode = AudioManager.MODE_IN_COMMUNICATION
-            am.isSpeakerphoneOn = true
+            // When a wired/Bluetooth headset is plugged in, let the audio route to it
+            // naturally (the OS does this for VOICE_COMMUNICATION) and keep the echo path
+            // local. Only force the loudspeaker when no headset is present, otherwise the
+            // assistant's voice would blast out of the phone speaker even with earphones on.
+            am.isSpeakerphoneOn = !hasHeadset(am)
             voiceCallModeEntered = true
         } catch (_: Exception) {
         }
+    }
+
+    private fun hasHeadset(am: AudioManager): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            for (d in am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+                when (d.type) {
+                    AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+                    AudioDeviceInfo.TYPE_WIRED_HEADSET,
+                    AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+                    AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> return true
+                }
+            }
+            return false
+        }
+        @Suppress("DEPRECATION")
+        return am.isWiredHeadsetOn || am.isBluetoothScoOn || am.isBluetoothA2dpOn
     }
 
     private fun exitVoiceCallMode() {
