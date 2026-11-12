@@ -20,6 +20,7 @@ import android.hardware.camera2.CameraManager
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.Log
 import android.util.Size
 import android.widget.Toast
@@ -66,6 +67,10 @@ class StreamingService : LifecycleService() {
     /** Optional ONVIF service (Settings > ONVIF) advertising the RTSP stream and motion events. */
     @Volatile private var onvifServer: OnvifServer? = null
     private var multicastLock: android.net.wifi.WifiManager.MulticastLock? = null
+    /** Held while the service runs so the CPU stays awake after the screen turns off;
+     *  without it Doze throttles the mic capture + HTTP server and the ESP32 board
+     *  stops hearing the user. Released in onDestroy. */
+    private var wakeLock: PowerManager.WakeLock? = null
     /** Motion detection over the capture frames already delivered to the streaming pipeline. */
     private var motionMonitor: MotionMonitor? = null
 
@@ -201,6 +206,13 @@ class StreamingService : LifecycleService() {
 
     override fun onCreate() {
         super.onCreate()
+        // Keep the device awake so the mic/HTTP streaming survives screen-off (Doze).
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+            wakeLock = pm?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "androidipcamera:streaming")
+            wakeLock?.setReferenceCounted(false)
+            wakeLock?.acquire()
+        } catch (_: Exception) { wakeLock = null }
         startForegroundService()
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
         val savedCameraId = prefs.getString(PREF_CAMERA_ID, null)
@@ -238,6 +250,8 @@ class StreamingService : LifecycleService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        try { wakeLock?.release() } catch (_: Exception) {}
+        wakeLock = null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P)
             try { unregisterReceiver(notificationChannelReceiver) } catch (_: Exception) {}
         safeStopRecording()
