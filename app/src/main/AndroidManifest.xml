@@ -8,6 +8,12 @@
          and force speakerphone, so the OS acoustic echo canceller can use it as the
          reference for the phone-av mic. Normal permission, granted at install. -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- Bluetooth routing so the assistant's TTS can play through Bluetooth earbuds.
+         BLUETOOTH_CONNECT is required on Android 12+ (API 31) and must be granted in
+         app settings (Nearby devices); without it getDevices() won't list BT devices
+         and startBluetoothSco() is denied, so audio falls back to the phone earpiece. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />

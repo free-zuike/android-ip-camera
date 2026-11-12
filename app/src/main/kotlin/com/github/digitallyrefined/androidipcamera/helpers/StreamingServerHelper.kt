@@ -1205,36 +1205,76 @@ class StreamingServerHelper(
         try {
             val am = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
             am.mode = AudioManager.MODE_IN_COMMUNICATION
-            // When a wired/Bluetooth headset is plugged in, let the audio route to it
-            // naturally (the OS does this for VOICE_COMMUNICATION) and keep the echo path
-            // local. Only force the loudspeaker when no headset is present, otherwise the
-            // assistant's voice would blast out of the phone speaker even with earphones on.
-            am.isSpeakerphoneOn = !hasHeadset(am)
+            when {
+                hasBluetooth(am) -> {
+                    // Switch the BT link to SCO so VOICE_COMMUNICATION audio actually
+                    // moves off the phone earpiece/speaker and onto the Bluetooth earbuds.
+                    // isSpeakerphoneOn is forced off so it never overrides the SCO route.
+                    @Suppress("DEPRECATION")
+                    am.startBluetoothSco()
+                    @Suppress("DEPRECATION")
+                    am.isBluetoothScoOn = true
+                    am.isSpeakerphoneOn = false
+                }
+                hasWiredHeadset(am) -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        findWiredDevice(am)?.let { am.setCommunicationDevice(it) }
+                    }
+                    am.isSpeakerphoneOn = false
+                }
+                else -> {
+                    am.isSpeakerphoneOn = true
+                }
+            }
             voiceCallModeEntered = true
         } catch (_: Exception) {
         }
     }
 
-    private fun hasHeadset(am: AudioManager): Boolean {
+    private fun hasBluetooth(am: AudioManager): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             for (d in am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
-                when (d.type) {
-                    AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
-                    AudioDeviceInfo.TYPE_WIRED_HEADSET,
-                    AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
-                    AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> return true
-                }
+                if (d.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                    d.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP) return true
             }
             return false
         }
         @Suppress("DEPRECATION")
-        return am.isWiredHeadsetOn || am.isBluetoothScoOn || am.isBluetoothA2dpOn
+        return am.isBluetoothScoOn || am.isBluetoothA2dpOn
+    }
+
+    private fun hasWiredHeadset(am: AudioManager): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            for (d in am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+                if (d.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                    d.type == AudioDeviceInfo.TYPE_WIRED_HEADSET) return true
+            }
+            return false
+        }
+        @Suppress("DEPRECATION")
+        return am.isWiredHeadsetOn
+    }
+
+    private fun findWiredDevice(am: AudioManager): AudioDeviceInfo? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return null
+        for (d in am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+            if (d.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                d.type == AudioDeviceInfo.TYPE_WIRED_HEADSET) return d
+        }
+        return null
     }
 
     private fun exitVoiceCallMode() {
         if (!voiceCallModeEntered) return
         try {
             val am = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            @Suppress("DEPRECATION")
+            am?.stopBluetoothSco()
+            @Suppress("DEPRECATION")
+            am?.isBluetoothScoOn = false
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                am?.clearCommunicationDevice()
+            }
             am?.isSpeakerphoneOn = false
             am?.mode = AudioManager.MODE_NORMAL
         } catch (_: Exception) {
