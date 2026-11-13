@@ -98,28 +98,34 @@ class StreamingServerHelper(
     @Volatile
     private var serverGeneration: Long = 0
 
-    // One shared AudioTrack for push-to-talk playback, so packets stream into a single
-    // continuous speaker session instead of one track per request. The watchdog only
-    // pauses it between packets; the track and the call-audio route stay alive for the
-    // lifetime of the server, so consecutive TTS answers never re-establish Bluetooth SCO.
+    // One shared AudioTrack for TTS playback. PCM POSTs are acknowledged as soon
+    // as the bytes are read and handed to a bounded queue; a dedicated player
+    // thread feeds the AudioTrack. Keeping the HTTP round trip short matters:
+    // the board's SpeakerTask blocks on it, and a slow POST drags the whole TTS
+    // uplink below realtime (answers then play during the NEXT question).
     private val talkLock = Any()
     private var talkTrack: AudioTrack? = null
     private var talkTrackActive = false
     private var talkTrackSampleRate = 44100
-    @Volatile
-    private var talkLastWriteAt = 0L
-    @Volatile
-    private var talkWatchdogStarted = false
     private var voiceCallModeEntered = false
 
-    // One TTS answer arrives as several POSTs with short gaps, and answers can be
-    // tens of seconds apart. Tearing down the AudioTrack (and MODE_IN_COMMUNICATION /
-    // Bluetooth SCO) between them made playback intermittent: startBluetoothSco() is
-    // asynchronous and takes seconds to come up, so every new answer lost its first
-    // packets while the route was being rebuilt. pause() keeps the track, its buffered
-    // PCM and the route; the only full teardown happens when the server stops (or the
-    // sample rate changes).
-    private val TALK_PAUSE_IDLE_MS = 1500L
+    // Bounded playback queue: if playback ever falls behind, drop the OLDEST
+    // audio instead of accumulating an ever-growing latency. 4 s @ 16 kHz mono
+    // absorbs Wi-Fi jitter without letting a song drift into the next answer.
+    private val talkQueueLock = Any()
+    private val talkQueue = java.util.ArrayDeque<TalkChunk>()
+    private var talkQueuedBytes = 0
+    private var talkDroppedBytesTotal = 0L
+    @Volatile
+    private var talkPlayerStarted = false
+    private val TALK_QUEUE_MAX_BYTES = 16000 * 2 * 4
+    private data class TalkChunk(val sampleRate: Int, val bytes: ByteArray)
+
+    // The track and the MODE_IN_COMMUNICATION / Bluetooth SCO route stay alive
+    // for the lifetime of the server: startBluetoothSco() is asynchronous and
+    // rebuilding it between answers loses the first seconds of every answer.
+    // The track is never paused either -- a paused MODE_STREAM track freezes the
+    // PCM still in its buffer and adds one more gap to every packet boundary.
 
     // SECURITY: Rate limiting constants (only for unauthenticated connections)
     private val MAX_FAILED_ATTEMPTS = 5  // 5 failed attempts allowed
@@ -977,6 +983,21 @@ class StreamingServerHelper(
                 return
             }
 
+            // Lightweight playback diagnostics (no adb needed): open this URL in a
+            // browser to check whether TTS audio is backing up or being dropped.
+            if (path == "/audio/talk-stats" && httpMethod == "GET") {
+                val (queued, chunks, dropped) = synchronized(talkQueueLock) {
+                    Triple(talkQueuedBytes, talkQueue.size, talkDroppedBytesTotal)
+                }
+                writer.print("HTTP/1.1 200 OK\r\n")
+                writer.print("Content-Type: application/json\r\n")
+                writer.print("Connection: close\r\n\r\n")
+                writer.print("{\"queued_bytes\":$queued,\"queue_chunks\":$chunks,\"queue_cap_bytes\":$TALK_QUEUE_MAX_BYTES,\"dropped_bytes\":$dropped}")
+                writer.flush()
+                try { socket.close() } catch (_: Exception) {}
+                return
+            }
+
             // ---- Push-to-talk: browser streams mic PCM to the phone's speaker ----
             if ((path == "/audio/upload" || path == "/audio/upload/16000") && httpMethod == "POST") {
                 val talkSampleRate = if (path == "/audio/upload/16000") 16000 else 44100
@@ -1145,11 +1166,12 @@ class StreamingServerHelper(
     }
 
     /**
-     * Push-to-talk upload: the web UI sends the browser-microphone 16-bit PCM (mono, 44.1 kHz)
-     * as fixed-size POST packets with Content-Length (Chrome refuses streamed upload bodies over
-     * HTTP/1.x). Each packet is appended to one shared [AudioTrack] and the response is sent
-     * immediately, so the browser stays ahead of playback (no growing latency). The blocking
-     * AudioTrack.write() provides natural back-pressure and keeps the phone's speaker in sync.
+     * TTS upload: the board (and the web UI) POST 16-bit mono PCM here. The 200 is
+     * sent as soon as the body has been read -- AudioTrack.write() used to run on
+     * this thread and blocked for seconds while its buffer was full, which stalled
+     * the board's SpeakerTask, overflowed its 2 s ring buffer and stretched one
+     * answer into the next question. Playback now runs on a dedicated thread fed
+     * by a bounded queue.
      */
     private fun handleTalkUpload(
         socket: Socket,
@@ -1161,10 +1183,13 @@ class StreamingServerHelper(
     ) {
         var headersSent = false
         try {
-            ensureTalkWatchdog()
+            ensureTalkPlayer()
             val completed: Boolean
             if (chunked || contentLength == null) {
-                completed = readChunkedBody(reader) { chunk -> writeTalkBytes(chunk, sampleRate) }
+                completed = readChunkedBody(reader) { chunk ->
+                    enqueueTalkBytes(chunk, sampleRate)
+                    true
+                }
             } else {
                 var remaining = contentLength
                 val charBuf = CharArray(8192)
@@ -1179,7 +1204,8 @@ class StreamingServerHelper(
                     val chunk = ByteArray(n)
                     for (i in 0 until n) chunk[i] = charBuf[i].code.toByte()
                     remaining -= n
-                    clean = writeTalkBytes(chunk, sampleRate)
+                    enqueueTalkBytes(chunk, sampleRate)
+                    clean = true
                 }
                 completed = clean && remaining <= 0
             }
@@ -1296,8 +1322,11 @@ class StreamingServerHelper(
 
     /** Full teardown of the TTS playback path. Only used on server stop / sample-rate change. */
     private fun releaseTalkPlayback() {
+        synchronized(talkQueueLock) {
+            talkQueue.clear()
+            talkQueuedBytes = 0
+        }
         synchronized(talkLock) {
-            talkLastWriteAt = 0L
             try { talkTrack?.stop() } catch (_: Exception) {}
             try { talkTrack?.release() } catch (_: Exception) {}
             talkTrack = null
@@ -1366,7 +1395,6 @@ class StreamingServerHelper(
                     }
                     off += written
                 }
-                talkLastWriteAt = System.currentTimeMillis()
                 true
             } catch (e: Exception) {
                 onLog("Talk: AudioTrack write error: ${e.message}")
@@ -1375,41 +1403,61 @@ class StreamingServerHelper(
         }
     }
 
-    private fun ensureTalkWatchdog() {
-        if (talkWatchdogStarted) return
-        synchronized(talkLock) {
-            if (talkWatchdogStarted) return
-            talkWatchdogStarted = true
+    private fun enqueueTalkBytes(chunk: ByteArray, sampleRate: Int) {
+        val item = TalkChunk(sampleRate, chunk)
+        var droppedBytes = 0
+        synchronized(talkQueueLock) {
+            talkQueue.addLast(item)
+            talkQueuedBytes += item.bytes.size
+            // Never let a backlog turn into minutes of latency: stale PCM is
+            // worthless once the conversation has moved on to the next answer.
+            while (talkQueuedBytes > TALK_QUEUE_MAX_BYTES && talkQueue.size > 1) {
+                val oldest = talkQueue.removeFirst()
+                talkQueuedBytes -= oldest.bytes.size
+                droppedBytes += oldest.bytes.size
+                talkDroppedBytesTotal += oldest.bytes.size
+            }
+        }
+        if (droppedBytes > 0) {
+            onLog("Talk: dropped ${droppedBytes}B of stale PCM to keep latency bounded")
+        }
+        ensureTalkPlayer()
+    }
+
+    /**
+     * Single consumer for the queue. AudioTrack.write() is blocking, so this
+     * thread paces itself to the audio clock; HTTP handlers never wait for it.
+     * The track stays in PLAYING state between answers -- a MODE_STREAM track
+     * simply underruns into silence and resumes on the next write, with no
+     * pause/stop and no Bluetooth SCO teardown.
+     */
+    private fun ensureTalkPlayer() {
+        if (talkPlayerStarted) return
+        synchronized(talkQueueLock) {
+            if (talkPlayerStarted) return
+            talkPlayerStarted = true
         }
         Thread {
-            try {
-                while (true) {
+            while (true) {
+                val item = synchronized(talkQueueLock) {
+                    val next = talkQueue.pollFirst()
+                    if (next != null) talkQueuedBytes -= next.bytes.size
+                    next
+                }
+                if (item == null) {
                     try {
-                        Thread.sleep(500)
+                        Thread.sleep(10)
                     } catch (_: InterruptedException) {
                         break
                     }
-                    if (talkLastWriteAt == 0L) continue
-                    synchronized(talkLock) {
-                        val idleMs = System.currentTimeMillis() - talkLastWriteAt
-                        if (idleMs > TALK_PAUSE_IDLE_MS && talkTrackActive) {
-                            // stop() on a MODE_STREAM track discards the PCM still in its
-                            // buffer, and releasing it also forces exitVoiceCallMode() /
-                            // stopBluetoothSco() followed by a fresh asynchronous
-                            // startBluetoothSco() on the next packet. pause() keeps the
-                            // track, its buffered PCM and the call-audio/SCO route; the
-                            // next POST simply calls play() again to resume.
-                            try {
-                                talkTrack?.pause()
-                            } catch (_: Exception) {
-                            }
-                            talkTrackActive = false
-                        }
-                    }
+                    continue
                 }
-            } catch (_: Exception) {
+                writeTalkBytes(item.bytes, item.sampleRate)
             }
-        }.also { it.isDaemon = true }.start()
+        }.also {
+            it.isDaemon = true
+            it.name = "phone-av-talk-player"
+        }.start()
     }
 
     /**
