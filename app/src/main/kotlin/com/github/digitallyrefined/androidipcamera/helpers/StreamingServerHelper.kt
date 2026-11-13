@@ -99,16 +99,27 @@ class StreamingServerHelper(
     private var serverGeneration: Long = 0
 
     // One shared AudioTrack for push-to-talk playback, so packets stream into a single
-    // continuous speaker session instead of one track per request. A watchdog stops it
-    // after a moment of silence, and the next packet lazily re-creates it.
+    // continuous speaker session instead of one track per request. The watchdog only
+    // pauses it between packets; the track and the call-audio route stay alive for the
+    // lifetime of the server, so consecutive TTS answers never re-establish Bluetooth SCO.
     private val talkLock = Any()
     private var talkTrack: AudioTrack? = null
     private var talkTrackActive = false
     private var talkTrackSampleRate = 44100
+    @Volatile
     private var talkLastWriteAt = 0L
     @Volatile
     private var talkWatchdogStarted = false
     private var voiceCallModeEntered = false
+
+    // One TTS answer arrives as several POSTs with short gaps, and answers can be
+    // tens of seconds apart. Tearing down the AudioTrack (and MODE_IN_COMMUNICATION /
+    // Bluetooth SCO) between them made playback intermittent: startBluetoothSco() is
+    // asynchronous and takes seconds to come up, so every new answer lost its first
+    // packets while the route was being rebuilt. pause() keeps the track, its buffered
+    // PCM and the route; the only full teardown happens when the server stops (or the
+    // sample rate changes).
+    private val TALK_PAUSE_IDLE_MS = 1500L
 
     // SECURITY: Rate limiting constants (only for unauthenticated connections)
     private val MAX_FAILED_ATTEMPTS = 5  // 5 failed attempts allowed
@@ -219,6 +230,7 @@ class StreamingServerHelper(
             serverSocket = null
         }
         closeClientConnection()
+        releaseTalkPlayback()
     }
 
     /**
@@ -1282,15 +1294,23 @@ class StreamingServerHelper(
         voiceCallModeEntered = false
     }
 
+    /** Full teardown of the TTS playback path. Only used on server stop / sample-rate change. */
+    private fun releaseTalkPlayback() {
+        synchronized(talkLock) {
+            talkLastWriteAt = 0L
+            try { talkTrack?.stop() } catch (_: Exception) {}
+            try { talkTrack?.release() } catch (_: Exception) {}
+            talkTrack = null
+            talkTrackActive = false
+            exitVoiceCallMode()
+        }
+    }
+
     private fun writeTalkBytes(chunk: ByteArray, sampleRate: Int): Boolean {
         return synchronized(talkLock) {
             try {
                 if (talkTrack != null && talkTrackSampleRate != sampleRate) {
-                    try { talkTrack?.stop() } catch (_: Exception) {}
-                    try { talkTrack?.release() } catch (_: Exception) {}
-                    talkTrack = null
-                    talkTrackActive = false
-                    exitVoiceCallMode()
+                    releaseTalkPlayback()
                 }
                 if (talkTrack == null) {
                     val minBuf = AudioTrack.getMinBufferSize(
@@ -1330,6 +1350,7 @@ class StreamingServerHelper(
                     }
                     talkTrack = track
                     talkTrackSampleRate = sampleRate
+                    onLog("Talk: AudioTrack created @ $sampleRate Hz (voice-call route kept for server lifetime)")
                 }
                 val track = talkTrack!!
                 if (!talkTrackActive) {
@@ -1368,22 +1389,21 @@ class StreamingServerHelper(
                     } catch (_: InterruptedException) {
                         break
                     }
-                    if (talkLastWriteAt != 0L && System.currentTimeMillis() - talkLastWriteAt > 1500) {
-                        synchronized(talkLock) {
-                            if (System.currentTimeMillis() - talkLastWriteAt > 1500) {
-                                talkLastWriteAt = 0L
-                                try {
-                                    talkTrack?.stop()
-                                } catch (_: Exception) {
-                                }
-                                try {
-                                    talkTrack?.release()
-                                } catch (_: Exception) {
-                                }
-                                talkTrack = null
-                                talkTrackActive = false
-                                exitVoiceCallMode()
+                    if (talkLastWriteAt == 0L) continue
+                    synchronized(talkLock) {
+                        val idleMs = System.currentTimeMillis() - talkLastWriteAt
+                        if (idleMs > TALK_PAUSE_IDLE_MS && talkTrackActive) {
+                            // stop() on a MODE_STREAM track discards the PCM still in its
+                            // buffer, and releasing it also forces exitVoiceCallMode() /
+                            // stopBluetoothSco() followed by a fresh asynchronous
+                            // startBluetoothSco() on the next packet. pause() keeps the
+                            // track, its buffered PCM and the call-audio/SCO route; the
+                            // next POST simply calls play() again to resume.
+                            try {
+                                talkTrack?.pause()
+                            } catch (_: Exception) {
                             }
+                            talkTrackActive = false
                         }
                     }
                 }
